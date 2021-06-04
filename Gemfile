@@ -1,6 +1,6 @@
 source "https://rubygems.org"
 
-ruby "2.5.7"
+ruby "2.6.7"
 
 group :development, :test do
   gem "heroku_hatchet"
