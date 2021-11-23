@@ -11,14 +11,21 @@ $:.unshift File.expand_path("../../../lib", __FILE__)
 require "language_pack"
 require "language_pack/shell_helpers"
 
+APP_DIR=ARGV[0]
+LAYER_DIR=ARGV[1]
+PLATFORM_DIR=ARGV[2]
+ENV_DIR="#{PLATFORM_DIR}/env"
+PLAN=ARGV[3]
+
 begin
-  LanguagePack::ShellHelpers.initialize_env(ARGV[2])
-  if pack = LanguagePack.detect(ARGV[0], ARGV[1])
+  LanguagePack::ShellHelpers.initialize_env(ENV_DIR)
+  if pack = LanguagePack.detect(ARGV[0], nil, LAYER_DIR)
     pack.topic("Compiling #{pack.name}")
     pack.log("compile") do
-      pack.compile
+      pack.build
     end
   end
 rescue Exception => e
   LanguagePack::ShellHelpers.display_error_and_exit(e)
 end
+

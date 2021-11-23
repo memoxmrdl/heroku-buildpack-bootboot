@@ -1,4 +1,5 @@
 require "shellwords"
+require "timeout"
 
 class BuildpackError < StandardError
 end
@@ -243,7 +244,7 @@ module LanguagePack
     # (indented by 6 spaces)
     # @param [String] message to be displayed
     def puts(message)
-      message.each_line do |line|
+      message.to_s.each_line do |line|
         if line.end_with?("\n".freeze)
           print "       #{line}"
         else

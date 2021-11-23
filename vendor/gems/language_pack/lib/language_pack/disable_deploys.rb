@@ -3,7 +3,7 @@ require "language_pack/base"
 
 class LanguagePack::DisableDeploys < LanguagePack::Base
   def self.use?
-    File.exist?(bundler.gemfile)
+    File.exist?("Gemfile")
   end
 
   def name

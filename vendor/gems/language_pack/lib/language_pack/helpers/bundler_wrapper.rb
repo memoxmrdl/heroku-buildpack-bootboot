@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require 'pathname'
 require 'language_pack/fetcher'
 
 # This class is responsible for installing and maintaining a
@@ -38,35 +37,25 @@ class LanguagePack::Helpers::BundlerWrapper
 
   BLESSED_BUNDLER_VERSIONS = {}
   BLESSED_BUNDLER_VERSIONS["1"] = "1.17.3"
-  BLESSED_BUNDLER_VERSIONS["2"] = "2.0.2"
+  BLESSED_BUNDLER_VERSIONS["2"] = "2.2.21"
   BUNDLED_WITH_REGEX = /^BUNDLED WITH$(\r?\n)   (?<major>\d+)\.\d+\.\d+/m
 
   class GemfileParseError < BuildpackError
-    def initialize(error, gemfile)
-      msg = String.new("There was an error parsing your #{gemfile}, we cannot continue\n")
+    def initialize(error)
+      msg = String.new("There was an error parsing your Gemfile, we cannot continue\n")
       msg << error
       super msg
     end
   end
 
-  class DuplicateGemfileError < BuildpackError
-    def initialize
-      super <<~ERR
-        You have both a Gemfile and a gems.rb in your repository. This is not
-        currently supported. You must remove one or the other for the buildpack
-        to correctly determine the Bundler version to use.
-      ERR
-    end
-  end
-
   class UnsupportedBundlerVersion < BuildpackError
-    def initialize(version_hash, major, lockfile)
-      msg = String.new("Your #{lockfile} indicates you need bundler `#{major}.x`\n")
+    def initialize(version_hash, major)
+      msg = String.new("Your Gemfile.lock indicates you need bundler `#{major}.x`\n")
       msg << "which is not currently supported. You can deploy with bundler version:\n"
       version_hash.keys.each do |v|
         msg << "  - `#{v}.x`\n"
       end
-      msg << "\nTo use another version of bundler, update your `#{lockfile}` to point\n"
+      msg << "\nTo use another version of bundler, update your `Gemfile.lock` to point\n"
       msg << "to a supported version. For example:\n"
       msg << "\n"
       msg << "```\n"
@@ -80,56 +69,20 @@ class LanguagePack::Helpers::BundlerWrapper
   attr_reader :bundler_path
 
   def initialize(options = {})
-    @bundler_tmp  = Pathname.new(Dir.mktmpdir)
-    @fetcher      = options[:fetcher] || LanguagePack::Fetcher.new(LanguagePack::Base::VENDOR_URL) # coupling
-    @build_dir    = options[:build_dir] ? Pathname(options[:build_dir]) : Pathname.new('.')
-
+    @bundler_tmp          = Pathname.new(Dir.mktmpdir)
+    @fetcher              = options[:fetcher]      || LanguagePack::Fetcher.new(LanguagePack::Base::VENDOR_URL) # coupling
+    @gemfile_path         = options[:gemfile_path] || Pathname.new("./Gemfile")
+    @gemfile_lock_path    = Pathname.new("#{@gemfile_path}.lock")
     detect_bundler_version_and_dir_name!
 
-    @bundler_path = options[:bundler_path] ? Pathname(options[:bundler_path]) : @bundler_tmp.join(dir_name)
-    @bundler_tar          = options[:bundler_tar] || "bundler/#{dir_name}.tgz"
+    @bundler_path         = options[:bundler_path] || @bundler_tmp.join(dir_name)
+    @bundler_tar          = options[:bundler_tar]  || "bundler/#{dir_name}.tgz"
     @orig_bundle_gemfile  = ENV['BUNDLE_GEMFILE']
     @path                 = Pathname.new("#{@bundler_path}/gems/#{dir_name}/lib")
   end
 
-  # This method is used before bundler is installed since we need to determine
-  # the lockfile path in order to determine the version of bundler to install.
-  # However, we can't know which gemfile/lockfile to prefer without Bundler
-  # being loaded since the version of Bundler being used determines the
-  # precedence of Gemfile vs gems.rb if they both exist. The simplest way to
-  # deterministically read the correct bundler version from the correct gemfile
-  # is to disallow having both of them.
-  def gemfile_path
-    @gemfile_path ||= begin
-      gems_rb_path = @build_dir.join("gems.rb")
-      gemfile_path = @build_dir.join("Gemfile")
-      if gems_rb_path.exist?
-        raise DuplicateGemfileError if gemfile_path.exist?
-        gems_rb_path
-      else
-        gemfile_path
-      end
-    end
-  end
-
-  def gemfile
-    @gemfile ||= gemfile_path.basename.to_s
-  end
-
-  def lockfile_path
-    @lockfile_path ||= if gemfile == "gems.rb"
-      @build_dir.join("gems.locked")
-    else
-      @build_dir.join("Gemfile.lock")
-    end
-  end
-
-  def lockfile
-    @lockfile ||= lockfile_path.basename.to_s
-  end
-
   def install
-    ENV['BUNDLE_GEMFILE'] = gemfile_path.to_s
+    ENV['BUNDLE_GEMFILE'] = @gemfile_path.to_s
 
     fetch_bundler
     $LOAD_PATH << @path
@@ -147,16 +100,14 @@ class LanguagePack::Helpers::BundlerWrapper
   end
 
   def gem_version(name)
-    instrument "ruby.gem_version" do
-      if spec = specs[name]
-        spec.version
-      end
+    if spec = specs[name]
+      spec.version
     end
   end
 
   # detects whether the Gemfile.lock contains the Windows platform
   # @return [Boolean] true if the Gemfile.lock was created on Windows
-  def windows_lockfile?
+  def windows_gemfile_lock?
     platforms.detect do |platform|
       /mingw|mswin/.match(platform.os) if platform.is_a?(Gem::Platform)
     end
@@ -178,62 +129,75 @@ class LanguagePack::Helpers::BundlerWrapper
     "bundler-#{version}"
   end
 
-  def instrument(*args, &block)
-    LanguagePack::Instrument.instrument(*args, &block)
-  end
-
   def ruby_version
-    instrument 'detect_ruby_version' do
-      env = { "PATH"     => "#{bundler_path}/bin:#{ENV['PATH']}",
-              "RUBYLIB"  => File.join(bundler_path, "gems", dir_name, "lib"),
-              "GEM_PATH" => "#{bundler_path}:#{ENV["GEM_PATH"]}",
-              "BUNDLE_DISABLE_VERSION_CHECK" => "true"
-            }
-      command = "bundle platform --ruby"
+    env = { "PATH"     => "#{bundler_path}/bin:#{ENV['PATH']}",
+            "RUBYLIB"  => File.join(bundler_path, "gems", dir_name, "lib"),
+            "GEM_PATH" => "#{bundler_path}:#{ENV["GEM_PATH"]}",
+            "BUNDLE_DISABLE_VERSION_CHECK" => "true"
+          }
+    command = "bundle platform --ruby"
 
-      # Silently check for ruby version
-      output  = run_stdout(command, user_env: true, env: env).strip.lines.last
+    # Silently check for ruby version
+    output  = run_stdout(command, user_env: true, env: env).strip.lines.last
 
-      # If there's a gem in the Gemfile (i.e. syntax error) emit error
-      raise GemfileParseError.new(run("bundle check", user_env: true, env: env), gemfile) unless $?.success?
-      if output.match(/No ruby version specified/)
-        ""
-      else
-        output.chomp.sub('(', '').sub(')', '').sub(/(p-?\d+)/, ' \1').split.join('-')
-      end
+    # If there's a gem in the Gemfile (i.e. syntax error) emit error
+    raise GemfileParseError.new(run("bundle check", user_env: true, env: env)) unless $?.success?
+    if output.match(/No ruby version specified/)
+      ""
+    else
+      output.strip.sub('(', '').sub(')', '').sub(/(p-?\d+)/, ' \1').split.join('-')
     end
   end
 
   def lockfile_parser
-    @lockfile_parser ||= parse_lockfile
+    @lockfile_parser ||= parse_gemfile_lock
+  end
+
+  # Some bundler versions have different behavior
+  # if config is global versus local. These versions need
+  # the environment variable BUNDLE_GLOBAL_PATH_APPENDS_RUBY_SCOPE=1
+  def needs_ruby_global_append_path?
+    Gem::Version.new(@version) < Gem::Version.new("2.1.4")
+  end
+
+  def bundler_version_escape_valve!
+    topic("Removing BUNDLED WITH version in the Gemfile.lock")
+    contents = File.read(@gemfile_lock_path, mode: "rt")
+    File.open(@gemfile_lock_path, "w") do |f|
+      f.write contents.sub(/^BUNDLED WITH$(\r?\n)   (?<major>\d+)\.\d+\.\d+/m, '')
+    end
   end
 
   private
   def fetch_bundler
-    instrument 'fetch_bundler' do
-      return true if Dir.exists?(bundler_path)
+    return true if Dir.exists?(bundler_path)
 
-      topic("Installing bundler #{@version}")
-      bundler_version_escape_valve!
+    topic("Installing bundler #{@version}")
+    bundler_version_escape_valve!
 
-      FileUtils.mkdir_p(bundler_path)
-      Dir.chdir(bundler_path) do
-        @fetcher.fetch_untar(@bundler_tar)
-      end
-      Dir["bin/*"].each {|path| `chmod 755 #{path}` }
+    # Install directory structure (as of Bundler 2.1.4):
+    # - cache
+    # - bin
+    # - gems
+    # - specifications
+    # - build_info
+    # - extensions
+    # - doc
+    FileUtils.mkdir_p(bundler_path)
+    Dir.chdir(bundler_path) do
+      @fetcher.fetch_untar(@bundler_tar)
     end
+    Dir["bin/*"].each {|path| `chmod 755 #{path}` }
   end
 
-  def parse_lockfile
-    instrument 'parse_lockfile' do
-      lockfile_contents = File.read(lockfile_path)
-      Bundler::LockfileParser.new(lockfile_contents)
-    end
+  def parse_gemfile_lock
+    gemfile_contents = File.read(@gemfile_lock_path)
+    Bundler::LockfileParser.new(gemfile_contents)
   end
 
   def major_bundler_version
     # https://rubular.com/r/jt9yj0aY7fU3hD
-    bundler_version_match = lockfile_path.read(mode: "rt").match(BUNDLED_WITH_REGEX)
+    bundler_version_match = @gemfile_lock_path.read(mode: "rt").match(BUNDLED_WITH_REGEX)
 
     if bundler_version_match
       bundler_version_match[:major]
@@ -250,15 +214,8 @@ class LanguagePack::Helpers::BundlerWrapper
     if BLESSED_BUNDLER_VERSIONS.key?(major)
       @version = BLESSED_BUNDLER_VERSIONS[major]
     else
-      raise UnsupportedBundlerVersion.new(BLESSED_BUNDLER_VERSIONS, major, lockfile)
+      raise UnsupportedBundlerVersion.new(BLESSED_BUNDLER_VERSIONS, major)
     end
   end
 
-  def bundler_version_escape_valve!
-    topic("Removing BUNDLED WITH version in the #{lockfile}")
-    contents = File.read(lockfile)
-    File.open(lockfile, "w") do |f|
-      f.write contents.sub(/^BUNDLED WITH$(\r?\n)   (?<major>\d+)\.\d+\.\d+/m, '')
-    end
-  end
 end
