@@ -8,7 +8,7 @@ require "bootboot_buildpack/bootboot_metadata"
 module BootbootBuildpack
   class Bootboot < LanguagePack::Ruby
     def self.bundler
-      @bundler ||= begin
+      @@bundler ||= begin
         setup_bootboot_buildpack_environment
         bundler = Helpers::BootbootBundlerWrapper.new
         topic "Using #{bundler.gemfile} and #{bundler.lockfile} for Bundler"
@@ -82,9 +82,19 @@ module BootbootBuildpack
 
     # We don't want to run the super version of this, we just want to
     # supplement what is already there.
-    def setup_profiled(*)
-      profiled_path = [binstubs_relative_paths.map { |path| "$HOME/#{path}" }.join(":")]
+    def setup_profiled(ruby_layer_path:, gem_layer_path:)
+      profiled_path = []
+      #profiled_path = [binstubs_relative_paths.map { |path| "#{gem_layer_path}/#{path}" }.join(":")]
+      profiled_path << "$HOME/bin"
+      profiled_path << "#{gem_layer_path}/#{binstubs_relative_paths[0]}"
+      profiled_path << "#{gem_layer_path}/#{binstubs_relative_paths[1]}"
+      profiled_path << "#{gem_layer_path}/#{binstubs_relative_paths[2]}"
       profiled_path << "$PATH"
+
+      set_env_default  "LANG",     "en_US.UTF-8"
+      set_env_override "GEM_PATH", "#{gem_layer_path}/#{slug_vendor_base}:$GEM_PATH"
+      set_env_override "PATH",      profiled_path.join(":")
+      set_env_override "DISABLE_SPRING", "1"
 
       add_to_profiled <<~EOS
         if [ -n "$#{env_next}" ]; then
