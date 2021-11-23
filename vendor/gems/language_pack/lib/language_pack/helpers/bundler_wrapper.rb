@@ -105,33 +105,20 @@ class LanguagePack::Helpers::BundlerWrapper
     end
   end
 
-  def gemfile_path
-    @gemfile_path ||= begin
-      gems_rb_path = @build_dir.join("gems.rb")
-      gemfile_path = @build_dir.join("Gemfile")
-      if gems_rb_path.exist?
-        raise DuplicateGemfileError if gemfile_path.exist?
-        gems_rb_path
-      else
-        gemfile_path
-      end
-    end
+  def gemfile
+    @gemfile ||= @gemfile_path.basename.to_s
   end
 
-  def gemfile
-    @gemfile ||= gemfile_path.basename.to_s
+  def gemfile_path
+    @gemfile_path
   end
 
   def lockfile_path
-    @lockfile_path ||= if gemfile == "gems.rb"
-      @build_dir.join("gems.locked")
-    else
-      @build_dir.join("Gemfile.lock")
-    end
+    @gemfile_lock_path
   end
 
   def lockfile
-    @lockfile ||= lockfile_path.basename.to_s
+    @lockfile ||= @gemfile_lock_path.basename.to_s
   end
 
   # detects whether the Gemfile.lock contains the Windows platform
