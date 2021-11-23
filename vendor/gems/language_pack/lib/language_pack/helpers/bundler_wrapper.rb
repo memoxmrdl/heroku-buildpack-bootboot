@@ -105,6 +105,22 @@ class LanguagePack::Helpers::BundlerWrapper
     end
   end
 
+  def gemfile
+    @gemfile ||= gemfile_path.basename.to_s
+  end
+
+  def lockfile_path
+    @lockfile_path ||= if gemfile == "gems.rb"
+      @build_dir.join("gems.locked")
+    else
+      @build_dir.join("Gemfile.lock")
+    end
+  end
+
+  def lockfile
+    @lockfile ||= lockfile_path.basename.to_s
+  end
+
   # detects whether the Gemfile.lock contains the Windows platform
   # @return [Boolean] true if the Gemfile.lock was created on Windows
   def windows_gemfile_lock?
