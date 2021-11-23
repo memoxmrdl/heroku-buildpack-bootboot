@@ -82,7 +82,7 @@ module BootbootBuildpack
 
     # We don't want to run the super version of this, we just want to
     # supplement what is already there.
-    def setup_profiled
+    def setup_profiled(*)
       profiled_path = [binstubs_relative_paths.map { |path| "$HOME/#{path}" }.join(":")]
       profiled_path << "$PATH"
 
