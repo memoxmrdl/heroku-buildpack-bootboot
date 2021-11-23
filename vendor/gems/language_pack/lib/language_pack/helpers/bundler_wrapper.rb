@@ -105,6 +105,19 @@ class LanguagePack::Helpers::BundlerWrapper
     end
   end
 
+  def gemfile_path
+    @gemfile_path ||= begin
+      gems_rb_path = @build_dir.join("gems.rb")
+      gemfile_path = @build_dir.join("Gemfile")
+      if gems_rb_path.exist?
+        raise DuplicateGemfileError if gemfile_path.exist?
+        gems_rb_path
+      else
+        gemfile_path
+      end
+    end
+  end
+
   def gemfile
     @gemfile ||= gemfile_path.basename.to_s
   end
